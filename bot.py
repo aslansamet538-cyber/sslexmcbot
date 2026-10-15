@@ -1,188 +1,828 @@
-import discord
-from discord.ext import commands
-import os
-from flask import Flask
-from threading import Thread
+const {
+  Client,
+  GatewayIntentBits,
+  EmbedBuilder,
+  ActionRowBuilder,
+  ButtonBuilder,
+  ButtonStyle,
+  ActivityType,
+  ChannelType,
+  PermissionsBitField,
+  ModalBuilder,
+  TextInputBuilder,
+  TextInputStyle
+} = require("discord.js");
 
-# ==========================================
-# 1. RENDER 7/24 AKTİF TUTMA ALTYAPISI
-# ==========================================
-app = Flask('')
-@app.route('/')
-def home(): return "🤖 TAHLİYE Bot 7/24 Aktif!"
+const http = require("http");
 
-def run(): app.run(host='0.0.0.0', port=int(os.environ.get('PORT', 3000)))
-def keep_alive(): Thread(target=run).start()
+// ==================================================
+// CRAFTDORA AYARLARI
+// ==================================================
 
-# ==========================================
-# 2. BOT YAPILANDIRMASI & KANAL SABİTLEME
-# ==========================================
-intents = discord.Intents.all()
-bot = commands.Bot(command_prefix="!", intents=intents, help_command=None)
+const TOKEN = process.env.DISCORD_TOKEN;
 
-# Kanal ID Sabitleri
-HEDEF_KANAL_ID = 1371568718542540842
-LOG_KANAL_ID = 1370346741181976596
+const MEMBER_LOG_CHANNEL_ID = "1560361912838004777";
+const ROLE_LOG_CHANNEL_ID = "1370346741181976596";
 
-@bot.event
-async def on_ready():
-    print(f"🤖 {bot.user.name} BAŞARIYLA ÇALIŞTI!")
-    await bot.change_presence(activity=discord.Game(name="TAHLİYE | 7/24 Aktif"))
+const PREFIX = "!";
 
-# ==========================================
-# 3. YARDIM KOMUTU SİSTEMİ
-# ==========================================
-@bot.command(name="yardım")
-async def yardim_komutu(ctx):
-    embed = discord.Embed(
-        title="🎫 Destek Bilgilendirmesi",
-        description="⚠️ Lütfen Sorununuz İçin **Ticket Oluşturun**.\n\n🔔 Oluşturduğunuz Ticketin İlgilenilmesi İçin Yetkilileri Sabırlı Şekilde Bekleyin.",
-        color=discord.Color.orange()
+const client = new Client({
+  intents: [
+    GatewayIntentBits.Guilds,
+    GatewayIntentBits.GuildMessages,
+    GatewayIntentBits.MessageContent,
+    GatewayIntentBits.GuildMembers
+  ]
+});
+
+// Çekilişler bot çalışırken bellekte tutulur.
+const giveaways = new Map();
+
+// ==================================================
+// RENDER WEB SUNUCUSU
+// ==================================================
+
+const webServer = http.createServer((req, res) => {
+  res.writeHead(200, {
+    "Content-Type": "text/plain; charset=utf-8"
+  });
+  res.end("CraftDora Bot aktif! play.craftdora.com");
+});
+
+webServer.listen(process.env.PORT || 10000, "0.0.0.0", () => {
+  console.log("CraftDora web sunucusu başlatıldı.");
+});
+
+// ==================================================
+// YARDIMCI FONKSİYONLAR
+// ==================================================
+
+function isAdmin(member) {
+  return Boolean(
+    member?.permissions.has(
+      PermissionsBitField.Flags.Administrator
     )
-    embed.set_footer(text=f"Talep Eden: {ctx.author.name}", icon_url=ctx.author.display_avatar.url)
-    await ctx.send(embed=embed)
+  );
+}
 
-# ==========================================
-# 4. KUSURSUZ ROL LOG & DM SİSTEMİ (ERENSİBOT)
-# ==========================================
-@bot.event
-async def on_member_update(before, after):
-    # Sadece rol değişikliklerinde tetiklenmesini sağla (Hata önleyici filtre)
-    if before.roles == after.roles:
-        return
+function parseDuration(input) {
+  const match = /^(\d+)\s*([smhd])$/i.exec(input || "");
+  if (!match) return null;
 
-    log_channel = bot.get_channel(LOG_KANAL_ID)
-    
-    # Değişen rolleri listeleme algoritması
-    added_roles = [role for role in after.roles if role not in before.roles]
-    removed_roles = [role for role in before.roles if role not in after.roles]
+  const amount = Number(match[1]);
 
-    # --- [DURUM 1: ROL EKLENDİ] ---
-    for role in added_roles:
-        # Tek bir temiz ErensiBot tarzı log mesajı
-        if log_channel:
-            embed_log = discord.Embed(
-                title="✨ Rol İşlemleri",
-                description=f"🔮 {after.mention} isimli üyeye yeni bir rol eklendi.",
-                color=discord.Color.green()
-            )
-            embed_log.add_field(name=" Yeni Rol", value=f"```+ {role.name}```", inline=False)
-            embed_log.add_field(name="🆔 Kullanıcı ID", value=f"`{after.id}`", inline=True)
-            embed_log.set_thumbnail(url=after.display_avatar.url)
-            embed_log.set_footer(text="TAHLİYE Yönetim Altyapısı")
-            await log_channel.send(embed=embed_log)
+  const units = {
+    s: 1000,
+    m: 60000,
+    h: 3600000,
+    d: 86400000
+  };
 
-        # Üyeye Özel Şık Gömülü DM Mesajı
-        try:
-            embed_dm = discord.Embed(
-                title=f"🎉 {after.guild.name} • Yeni Bir Rol Aldın!",
-                description=f"Selam {after.mention},\n\nSunucumuzda harika bir gelişme oldu! Sana yepyeni bir rol tanımlandı. Topluluğumuzdaki yerin her geçen gün daha da güçleniyor. ✨",
-                color=discord.Color.green()
-            )
-            embed_dm.add_field(name="👑 Tanımlanan Rol", value=f"↳ **{role.name}**", inline=False)
-            embed_dm.set_thumbnail(url=after.guild.icon.url if after.guild.icon else after.display_avatar.url)
-            embed_dm.set_footer(text="Keyifli vakit geçirmeni dileriz! - TAHLİYE")
-            await after.send(embed=embed_dm)
-        except Exception:
-            pass  # Kullanıcının DM kutusu kapalıysa kodun çökmesini önler
+  const duration = amount * units[match[2].toLowerCase()];
 
-    # --- [DURUM 2: ROL KALDIRILDI] ---
-    for role in removed_roles:
-        # Tek bir temiz ErensiBot tarzı log mesajı
-        if log_channel:
-            embed_log = discord.Embed(
-                title="✨ Rol İşlemleri",
-                description=f"🔮 {after.mention} isimli üyeden bir rol kaldırıldı.",
-                color=discord.Color.red()
-            )
-            embed_log.add_field(name="❌ Rol Kaldırıldı", value=f"```- {role.name}```", inline=False)
-            embed_log.add_field(name="🆔 Kullanıcı ID", value=f"`{after.id}`", inline=True)
-            embed_log.set_thumbnail(url=after.display_avatar.url)
-            embed_log.set_footer(text="TAHLİYE Yönetim Altyapısı")
-            await log_channel.send(embed=embed_log)
+  if (duration < 10000 || duration > 30 * 86400000) {
+    return null;
+  }
 
-        # Üyeye Özel Şık Gömülü DM Mesajı
-        try:
-            embed_dm_kaldirildi = discord.Embed(
-                title=f"⚠️ {after.guild.name} • Bir Rolün Güncellendi",
-                description=f"Selam {after.mention},\n\nSunucumuzdaki rollerin güncellendi ve bir rolün üzerinden geri alındı.",
-                color=discord.Color.red()
-            )
-            embed_dm_kaldirildi.add_field(name="📉 Alınan Rol", value=f"↳ ~~{role.name}~~", inline=False)
-            embed_dm_kaldirildi.set_thumbnail(url=after.guild.icon.url if after.guild.icon else after.display_avatar.url)
-            embed_dm_kaldirildi.set_footer(text="Soruların için yetkililerle iletişime geçebilirsin. - TAHLİYE")
-            await after.send(embed=embed_dm_kaldirildi)
-        except Exception:
-            pass
+  return duration;
+}
 
-# ==========================================
-# 5. GİRİŞ / DM HOŞ GELDİN SİSTEMİ
-# ==========================================
-@bot.event
-async def on_member_join(member):
-    channel = bot.get_channel(HEDEF_KANAL_ID)
-    if channel:
-        embed_kanal = discord.Embed(
-            title="📥 Ailemiz Genişliyor!",
-            description=f"Sunucumuza hoş geldin {member.mention}! Seninle birlikte tam **{member.guild.member_count}** kişi olduk. 🎉",
-            color=discord.Color.green()
+function safeChannelPart(text, maxLength = 20) {
+  return text
+    .toLocaleLowerCase("tr-TR")
+    .replace(/ı/g, "i")
+    .replace(/ğ/g, "g")
+    .replace(/ü/g, "u")
+    .replace(/ş/g, "s")
+    .replace(/ö/g, "o")
+    .replace(/ç/g, "c")
+    .replace(/[^a-z0-9-]/g, "-")
+    .replace(/-+/g, "-")
+    .replace(/^-|-$/g, "")
+    .slice(0, maxLength) || "destek";
+}
+
+// ==================================================
+// BOT HAZIR
+// ==================================================
+
+client.once("ready", () => {
+  console.log(`CraftDora aktif: ${client.user.tag}`);
+
+  client.user.setActivity("play.craftdora.com", {
+    type: ActivityType.Playing
+  });
+});
+
+// ==================================================
+// ÜYE GİRİŞ LOGU
+// ==================================================
+
+client.on("guildMemberAdd", async member => {
+  const channel = member.guild.channels.cache.get(
+    MEMBER_LOG_CHANNEL_ID
+  );
+
+  const embed = new EmbedBuilder()
+    .setColor("#2ecc71")
+    .setTitle("📥 CraftDora | Yeni Üye Katıldı")
+    .setDescription(
+      `🌿 Sunucumuza yeni bir oyuncu katıldı!\n\n` +
+      `👤 **Üye:** ${member.user.tag}\n` +
+      `🆔 **Kullanıcı ID:** ${member.id}\n` +
+      `👥 **Güncel üye sayısı:** ${member.guild.memberCount}\n\n` +
+      `CraftDora ailesine hoş geldin!`
+    )
+    .setThumbnail(member.user.displayAvatarURL())
+    .setFooter({ text: "CraftDora • Üye Kayıt Sistemi" })
+    .setTimestamp();
+
+  if (channel?.isTextBased()) {
+    try {
+      await channel.send({ embeds: [embed] });
+    } catch (error) {
+      console.error("Giriş logu hatası:", error.message);
+    }
+  }
+
+  // Özel hoş geldin mesajı
+  const welcomeEmbed = new EmbedBuilder()
+    .setColor("#2ecc71")
+    .setTitle("🌿 CraftDora Dünyasına Hoş Geldin!")
+    .setDescription(
+      `Merhaba ${member.user.username}!\n\n` +
+      `🌲 **Sunucu adresi:** play.craftdora.com\n` +
+      `📜 Kuralları okumayı unutma.\n` +
+      `🎫 Sorun yaşarsan destek talebi oluşturabilirsin.\n\n` +
+      `Sana iyi oyunlar dileriz! ⛏️`
+    )
+    .setThumbnail(
+      member.guild.iconURL({ size: 256 }) ||
+      client.user.displayAvatarURL()
+    );
+
+  try {
+    await member.send({ embeds: [welcomeEmbed] });
+  } catch {
+    // Üyenin DM kutusu kapalı olabilir.
+  }
+});
+
+// ==================================================
+// ÜYE ÇIKIŞ LOGU
+// ==================================================
+
+client.on("guildMemberRemove", async member => {
+  const channel = member.guild.channels.cache.get(
+    MEMBER_LOG_CHANNEL_ID
+  );
+
+  const embed = new EmbedBuilder()
+    .setColor("#e74c3c")
+    .setTitle("📤 CraftDora | Üye Ayrıldı")
+    .setDescription(
+      `🍂 Bir oyuncu sunucumuzdan ayrıldı.\n\n` +
+      `👤 **Üye:** ${member.user.tag}\n` +
+      `🆔 **Kullanıcı ID:** ${member.id}\n` +
+      `👥 **Kalan üye sayısı:** ${member.guild.memberCount}\n\n` +
+      `CraftDora'da geçirdiği zaman için teşekkür ederiz.`
+    )
+    .setThumbnail(member.user.displayAvatarURL())
+    .setFooter({ text: "CraftDora • Üye Kayıt Sistemi" })
+    .setTimestamp();
+
+  if (channel?.isTextBased()) {
+    try {
+      await channel.send({ embeds: [embed] });
+    } catch (error) {
+      console.error("Çıkış logu hatası:", error.message);
+    }
+  }
+});
+
+// ==================================================
+// ROL EKLEME / KALDIRMA LOGU
+// ==================================================
+
+client.on("guildMemberUpdate", async (before, after) => {
+  if (before.roles.cache.equals(after.roles.cache)) return;
+
+  const channel = after.guild.channels.cache.get(
+    ROLE_LOG_CHANNEL_ID
+  );
+
+  if (!channel?.isTextBased()) return;
+
+  const added = after.roles.cache.filter(
+    role =>
+      !before.roles.cache.has(role.id) &&
+      role.id !== after.guild.id
+  );
+
+  const removed = before.roles.cache.filter(
+    role =>
+      !after.roles.cache.has(role.id) &&
+      role.id !== after.guild.id
+  );
+
+  for (const role of added.values()) {
+    const embed = new EmbedBuilder()
+      .setColor("#2ecc71")
+      .setTitle("✨ CraftDora | Rol Eklendi")
+      .setDescription(`${after} kullanıcısına yeni bir rol verildi.`)
+      .addFields(
+        { name: "Eklenen rol", value: `\`${role.name}\`` },
+        { name: "Kullanıcı ID", value: `\`${after.id}\`` }
+      )
+      .setThumbnail(after.displayAvatarURL())
+      .setTimestamp();
+
+    try {
+      await channel.send({ embeds: [embed] });
+    } catch (error) {
+      console.error("Rol logu hatası:", error.message);
+    }
+
+    try {
+      await after.send(
+        `🎉 CraftDora'da sana **${role.name}** rolü verildi!`
+      );
+    } catch {}
+  }
+
+  for (const role of removed.values()) {
+    const embed = new EmbedBuilder()
+      .setColor("#e74c3c")
+      .setTitle("➖ CraftDora | Rol Kaldırıldı")
+      .setDescription(`${after} kullanıcısından bir rol kaldırıldı.`)
+      .addFields(
+        { name: "Kaldırılan rol", value: `\`${role.name}\`` },
+        { name: "Kullanıcı ID", value: `\`${after.id}\`` }
+      )
+      .setThumbnail(after.displayAvatarURL())
+      .setTimestamp();
+
+    try {
+      await channel.send({ embeds: [embed] });
+    } catch (error) {
+      console.error("Rol logu hatası:", error.message);
+    }
+
+    try {
+      await after.send(
+        `⚠️ CraftDora'da **${role.name}** rolün kaldırıldı.`
+      );
+    } catch {}
+  }
+});
+
+// ==================================================
+// ÇEKİLİŞİ BİTİR
+// ==================================================
+
+async function finishGiveaway(messageId) {
+  const giveaway = giveaways.get(messageId);
+  if (!giveaway) return;
+
+  giveaways.delete(messageId);
+
+  try {
+    const channel = await client.channels.fetch(giveaway.channelId);
+    if (!channel?.isTextBased()) return;
+
+    const participants = [...giveaway.participants];
+
+    const disabledRow = new ActionRowBuilder().addComponents(
+      new ButtonBuilder()
+        .setCustomId(`giveaway_ended_${messageId}`)
+        .setLabel("Çekiliş Sona Erdi")
+        .setStyle(ButtonStyle.Secondary)
+        .setDisabled(true)
+    );
+
+    const embed = new EmbedBuilder()
+      .setColor("#5865f2")
+      .setTitle("🏆 CraftDora | Çekiliş Bitti")
+      .setDescription(`🎁 **Ödül:** ${giveaway.prize}`)
+      .setTimestamp();
+
+    if (participants.length === 0) {
+      embed.addFields({
+        name: "Sonuç",
+        value: "Katılımcı olmadığı için kazanan seçilemedi."
+      });
+
+      await channel.send({ embeds: [embed] });
+    } else {
+      const winner =
+        participants[Math.floor(Math.random() * participants.length)];
+
+      embed.addFields({
+        name: "🎉 Kazanan",
+        value: `<@${winner}>`
+      });
+
+      await channel.send({
+        content: `🎉 Tebrikler <@${winner}>! **${giveaway.prize}** kazandın!`,
+        embeds: [embed]
+      });
+    }
+
+    const originalMessage = await channel.messages.fetch(messageId);
+    await originalMessage.edit({ components: [disabledRow] });
+
+  } catch (error) {
+    console.error("Çekiliş bitiş hatası:", error.message);
+  }
+}
+
+// ==================================================
+// MESAJ VE KOMUT SİSTEMİ
+// ==================================================
+
+client.on("messageCreate", async message => {
+  if (message.author.bot || !message.guild) return;
+
+  const msg = message.content.toLocaleLowerCase("tr-TR").trim();
+
+  // SELAMLAŞMA
+  if (["sa", "s.a", "selam", "selamun aleyküm",
+       "selamün aleyküm", "selamun aleykum"].includes(msg)) {
+    return message.reply(
+      "👋 Aleyküm Selam! **CraftDora** dünyasına hoş geldin! 🌿⛏️"
+    );
+  }
+
+  if (msg.includes("naber") || msg.includes("nasılsın") || msg === "nbr") {
+    return message.reply(
+      "😊 İyiyim, çok teşekkür ederim! CraftDora'da keyifler nasıl? 🌲💚"
+    );
+  }
+
+  if (
+    msg.includes("iyiyim sen nasılsın") ||
+    msg.includes("bende iyi sen nasılsın") ||
+    msg.includes("ben de iyi sen nasılsın")
+  ) {
+    return message.reply(
+      "Harika! İyi olmana sevindim. CraftDora'da keyifli oyunlar! 💚🎒"
+    );
+  }
+
+  if (msg.includes("iyi geceler") || msg === "ig") {
+    return message.reply(
+      "Sana da iyi geceler! Yarın CraftDora'da görüşmek üzere! 🌙💤"
+    );
+  }
+
+  if (msg.includes("günaydın") || msg.includes("gunaydin")) {
+    return message.reply("☀️ Günaydın! CraftDora'da güzel bir gün geçir!");
+  }
+
+  if (msg.includes("iyi akşamlar") || msg.includes("iyi aksamlar")) {
+    return message.reply("🌆 Sana da iyi akşamlar! 💚");
+  }
+
+  if (
+    msg === "eyw" ||
+    msg === "eyvallah" ||
+    msg.includes("teşekkürler") ||
+    msg.includes("tesekkurler")
+  ) {
+    return message.reply("💚 Rica ederiz! İyi eğlenceler!");
+  }
+
+  // SUNUCU IP
+  if (["!ip", "ip", "sunucu ip"].includes(msg)) {
+    const embed = new EmbedBuilder()
+      .setColor("#2ecc71")
+      .setTitle("⚔️ CraftDora | Sunucu Bilgileri")
+      .setDescription(
+        "🌲 **Sunucu adresi:** `play.craftdora.com`\n\n" +
+        "🛡️ **Java sürümleri:** 1.20.1 - 26.3\n" +
+        "📱 **Mobil sürümleri:** 1.20.1 - 26.3\n\n" +
+        "📌 Bağlantı sorunu yaşarsan destek talebi oluşturabilirsin."
+      )
+      .setThumbnail(
+        message.guild.iconURL({ size: 256 }) ||
+        client.user.displayAvatarURL()
+      );
+
+    const row = new ActionRowBuilder().addComponents(
+      new ButtonBuilder()
+        .setLabel("CraftDora Web")
+        .setStyle(ButtonStyle.Link)
+        .setURL("https://craftdora.com")
+    );
+
+    return message.reply({ embeds: [embed], components: [row] });
+  }
+
+  // YARDIM
+  if (["!yardım", "!yardim", "!help"].includes(msg)) {
+    const embed = new EmbedBuilder()
+      .setColor("#2ecc71")
+      .setTitle("🌲 CraftDora | Komut Listesi")
+      .setDescription(
+        "`!ip` — Sunucu bilgileri\n" +
+        "`!yardım` — Komut listesi\n" +
+        "`!çekiliş 10m 1 Aylık VIP` — Çekiliş oluştur\n" +
+        "`!destek-kur` — Ticket paneli oluştur\n" +
+        "`!kapat` — Ticket kanalını kapat\n" +
+        "`!kurallar-kur` — Kuralları gönder\n" +
+        "`!başvuru-kur` — Yetkili başvuru paneli"
+      );
+
+    return message.reply({ embeds: [embed] });
+  }
+
+  // 15 MADDELİ KURAL PANELİ
+  if (msg === "!kurallar-kur") {
+    if (!isAdmin(message.member)) {
+      return message.reply("❌ Bu komut için yönetici yetkisi gerekiyor.");
+    }
+
+    const embed = new EmbedBuilder()
+      .setColor("#ff9f1c")
+      .setTitle("📜 CraftDora | Sunucu Kuralları")
+      .setDescription(
+        "**1. Saygı:** Oyunculara ve yetkililere saygılı davranın.\n\n" +
+        "**2. Hakaret:** Tehdit, taciz ve ayrımcı söylemler yasaktır.\n\n" +
+        "**3. Hile:** Hile, makro ve haksız avantaj sağlayan yazılımlar yasaktır.\n\n" +
+        "**4. Açık kullanımı:** Oyun hatalarını kötüye kullanmayın; yetkililere bildirin.\n\n" +
+        "**5. Dolandırıcılık:** Oyuncuları kandırmak ve haksız eşya almak yasaktır.\n\n" +
+        "**6. Reklam:** İzinsiz sunucu reklamı yapmak yasaktır.\n\n" +
+        "**7. Spam:** Sohbeti gereksiz mesajlarla doldurmayın.\n\n" +
+        "**8. Özel bilgiler:** Kişisel bilgilerinizi veya başkasının bilgilerini paylaşmayın.\n\n" +
+        "**9. Yetkili taklidi:** Sahte yetkili kimliği kullanmayın.\n\n" +
+        "**10. Kanal düzeni:** Kanalları amacına uygun kullanın.\n\n" +
+        "**11. Haksız kazanç:** Sistemleri ve ödülleri istismar etmeyin.\n\n" +
+        "**12. Tehdit ve şantaj:** Oyunculara baskı kurmak yasaktır.\n\n" +
+        "**13. Ticket:** Destek sistemini gereksiz yere meşgul etmeyin.\n\n" +
+        "**14. Gizlilik:** Özel yazışmaları izinsiz yaymayın.\n\n" +
+        "**15. Yetkili kararları:** İtirazlarınızı destek kanallarından saygılı şekilde iletin.\n\n" +
+        "━━━━━━━━━━━━━━━━━━\n" +
+        "🌿 Kuralları ihlal edenlere ihlalin durumuna göre işlem uygulanabilir.\n" +
+        "**CraftDora'da herkese iyi oyunlar!** ⛏️"
+      )
+      .setFooter({ text: "CraftDora • Kuralları okuyun" })
+      .setTimestamp();
+
+    return message.channel.send({ embeds: [embed] });
+  }
+
+  // TICKET PANELİ
+  if (msg === "!destek-kur") {
+    if (!isAdmin(message.member)) {
+      return message.reply("❌ Bu komut için yönetici yetkisi gerekiyor.");
+    }
+
+    const embed = new EmbedBuilder()
+      .setColor("#ff9f1c")
+      .setTitle("🎫 CraftDora | Destek Merkezi")
+      .setDescription(
+        "Bir sorun, şikâyet veya sorunuz mu var?\n\n" +
+        "1. Aşağıdaki butona basın.\n" +
+        "2. Minecraft oyuncu adınızı girin.\n" +
+        "3. Sorununuzu açıklayın.\n" +
+        "4. Size özel bir destek kanalı oluşturulsun.\n\n" +
+        "Her üye aynı anda bir açık ticket oluşturabilir."
+      )
+      .setFooter({ text: "CraftDora Destek Sistemi" });
+
+    const row = new ActionRowBuilder().addComponents(
+      new ButtonBuilder()
+        .setCustomId("craftdora_ticket_open")
+        .setLabel("Destek Talebi Aç 🎫")
+        .setStyle(ButtonStyle.Success)
+    );
+
+    return message.channel.send({ embeds: [embed], components: [row] });
+  }
+
+  // YETKİLİ BAŞVURU PANELİ
+  if (msg === "!başvuru-kur") {
+    if (!isAdmin(message.member)) {
+      return message.reply("❌ Bu komut için yönetici yetkisi gerekiyor.");
+    }
+
+    const embed = new EmbedBuilder()
+      .setColor("#3498db")
+      .setTitle("📝 CraftDora | Yetkili Başvurusu")
+      .setDescription(
+        "CraftDora ekibine katılmak mı istiyorsun?\n\n" +
+        "Başvuru yapmak için yönetim ekibiyle iletişime geç. " +
+        "Başvurunda deneyimini, yaşını ve neden ekibe katılmak istediğini belirt."
+      );
+
+    return message.channel.send({ embeds: [embed] });
+  }
+
+  // ÇEKİLİŞ: !çekiliş 10m 1 Aylık VIP
+  if (msg.startsWith("!çekiliş ") || msg.startsWith("!cekilis ")) {
+    if (!isAdmin(message.member)) {
+      return message.reply("❌ Bu komut için yönetici yetkisi gerekiyor.");
+    }
+
+    const args = message.content.trim().split(/\s+/);
+    const durationText = args[1];
+    const prize = args.slice(2).join(" ").trim();
+    const duration = parseDuration(durationText);
+
+    if (!duration || !prize) {
+      return message.reply(
+        "❌ Kullanım: `!çekiliş 10m 1 Aylık VIP`\n" +
+        "Süre biçimleri: `30s`, `10m`, `2h`, `1d`.\n" +
+        "Süre 10 saniye ile 30 gün arasında olmalıdır."
+      );
+    }
+
+    const embed = new EmbedBuilder()
+      .setColor("#f1c40f")
+      .setTitle("🎁 CRAFTDORA ÇEKİLİŞİ BAŞLADI!")
+      .setDescription(
+        `🎁 **Ödül:** ${prize}\n` +
+        `⏳ **Süre:** ${durationText}\n` +
+        `👑 **Düzenleyen:** ${message.author}\n\n` +
+        "Katılmak için aşağıdaki butona bas!"
+      )
+      .setTimestamp(Date.now() + duration)
+      .setFooter({ text: "CraftDora • Bol şans!" });
+
+    const row = new ActionRowBuilder().addComponents(
+      new ButtonBuilder()
+        .setCustomId("craftdora_giveaway_join")
+        .setLabel("Çekilişe Katıl 🎉")
+        .setStyle(ButtonStyle.Success)
+    );
+
+    const giveawayMessage = await message.channel.send({
+      embeds: [embed],
+      components: [row]
+    });
+
+    giveaways.set(giveawayMessage.id, {
+      channelId: message.channel.id,
+      prize,
+      participants: new Set()
+    });
+
+    setTimeout(() => {
+      finishGiveaway(giveawayMessage.id);
+    }, duration);
+
+    return;
+  }
+
+  // TICKET KAPAT
+  if (msg === "!kapat" || msg === "!ticket-kapat") {
+    const channel = message.channel;
+
+    if (
+      channel.type !== ChannelType.GuildText ||
+      !channel.topic?.startsWith("craftdora-ticket-owner:")
+    ) {
+      return message.reply(
+        "Bu komut yalnızca CraftDora ticket kanalında kullanılabilir."
+      );
+    }
+
+    const ownerId = channel.topic.split(":")[1];
+
+    if (
+      message.author.id !== ownerId &&
+      !isAdmin(message.member)
+    ) {
+      return message.reply(
+        "❌ Ticketı yalnızca sahibi veya yönetici kapatabilir."
+      );
+    }
+
+    await message.reply("🔒 Ticket 5 saniye içinde kapatılıyor.");
+
+    setTimeout(() => {
+      channel.delete("CraftDora ticket kapatıldı.").catch(console.error);
+    }, 5000);
+  }
+});
+
+// ==================================================
+// TÜM BUTON VE FORM ETKİLEŞİMLERİ
+// ==================================================
+
+client.on("interactionCreate", async interaction => {
+  try {
+    // TICKET FORMU GÖNDERİLDİ
+    if (
+      interaction.isModalSubmit() &&
+      interaction.customId === "craftdora_ticket_form"
+    ) {
+      await interaction.deferReply({ ephemeral: true });
+
+      const playerName = interaction.fields
+        .getTextInputValue("player_name").trim();
+
+      const issue = interaction.fields
+        .getTextInputValue("ticket_issue").trim();
+
+      const guild = interaction.guild;
+
+      if (!guild) {
+        return interaction.editReply(
+          "Bu işlem yalnızca sunucuda kullanılabilir."
+        );
+      }
+
+      const existing = guild.channels.cache.find(channel =>
+        channel.type === ChannelType.GuildText &&
+        channel.topic === `craftdora-ticket-owner:${interaction.user.id}`
+      );
+
+      if (existing) {
+        return interaction.editReply(
+          `Zaten açık bir destek talebin var: ${existing}`
+        );
+      }
+
+      const playerPart = safeChannelPart(playerName, 15);
+      const issuePart = safeChannelPart(issue, 22);
+
+      const botMember = guild.members.me;
+
+      if (!botMember) {
+        return interaction.editReply(
+          "Bot sunucu bilgilerine erişemedi. Lütfen tekrar dene."
+        );
+      }
+
+      const channel = await guild.channels.create({
+        name: `ticket-${playerPart}-${issuePart}`.slice(0, 95),
+        type: ChannelType.GuildText,
+        topic: `craftdora-ticket-owner:${interaction.user.id}`,
+        permissionOverwrites: [
+          {
+            id: guild.roles.everyone.id,
+            deny: [PermissionsBitField.Flags.ViewChannel]
+          },
+          {
+            id: interaction.user.id,
+            allow: [
+              PermissionsBitField.Flags.ViewChannel,
+              PermissionsBitField.Flags.SendMessages,
+              PermissionsBitField.Flags.ReadMessageHistory,
+              PermissionsBitField.Flags.AttachFiles
+            ]
+          },
+          {
+            id: botMember.id,
+            allow: [
+              PermissionsBitField.Flags.ViewChannel,
+              PermissionsBitField.Flags.SendMessages,
+              PermissionsBitField.Flags.ReadMessageHistory,
+              PermissionsBitField.Flags.ManageChannels
+            ]
+          }
+        ],
+        reason: `CraftDora destek talebi: ${interaction.user.tag}`
+      });
+
+      const ticketEmbed = new EmbedBuilder()
+        .setColor("#ff9f1c")
+        .setTitle("🎫 CraftDora | Destek Talebi")
+        .setDescription(
+          `Merhaba ${interaction.user}!\n\n` +
+          `👤 **Minecraft oyuncu adı:** ${playerName}\n` +
+          `📌 **Destek konusu:** ${issue}\n\n` +
+          "Sorununun ayrıntılarını bu kanalda paylaş. " +
+          "Yetkililer seninle ilgilenecektir.\n\n" +
+          "Talebi kapatmak için `!kapat` yazabilirsin."
         )
-        embed_kanal.set_thumbnail(url=member.display_avatar.url)
-        await channel.send(embed=embed_kanal)
+        .setFooter({ text: "CraftDora Destek Sistemi" })
+        .setTimestamp();
 
-    try:
-        embed_dm = discord.Embed(
-            title=f"👑 {member.guild.name} Dünyasına Hoş Geldin!",
-            description=f"Selam {member.mention},\n\nSunucumuza katılarak topluluğumuza büyük bir değer kattın! **TAHLİYE Bot** olarak, sunucu içerisindeki konforunu, güvenliğini ve eğlenceni sağlamak adına 7/24 arka planda görevimin başındayım. 😉\n\nSohbet kanallarımızda yerini almayı, topluluk kurallarımızı incelemeyi ve ekibimizle tanışmayı unutma.",
-            color=discord.Color.gold()
-        )
-        embed_dm.add_field(name="📊 Güncel Durumumuz", value=f"Şu an sunucumuzda seninle birlikte **{member.guild.member_count}** seçkin üye bulunuyor.", inline=False)
-        embed_dm.set_thumbnail(url=member.guild.icon.url if member.guild.icon else member.display_avatar.url)
-        embed_dm.set_footer(text="Unutulmaz anlar geçirmeni dileriz! - TAHLİYE Üst Düzey Yönetim Sistemi")
-        await member.send(embed=embed_dm)
-    except Exception:
-        pass
+      await channel.send({
+        content: `${interaction.user}`,
+        embeds: [ticketEmbed]
+      });
 
-# ==========================================
-# 6. ÇIKIŞ / DM GÜLE GÜLE SİSTEMİ
-# ==========================================
-@bot.event
-async def on_member_remove(member):
-    channel = bot.get_channel(HEDEF_KANAL_ID)
-    if channel:
-        embed_kanal = discord.Embed(
-            title="📤 Aramızdan Biri Ayrıldı",
-            description=f"**{member.name}** sunucudan ayrıldı. Geriye **{member.guild.member_count}** kişi kaldık... 😔",
-            color=discord.Color.red()
-        )
-        embed_kanal.set_thumbnail(url=member.display_avatar.url)
-        await channel.send(embed=embed_kanal)
+      return interaction.editReply(
+        `✅ Destek talebin oluşturuldu: ${channel}`
+      );
+    }
 
-    try:
-        embed_dm_cikis = discord.Embed(
-            title=f"💔 Ayrılık Vakti... Yolun Açık Olsun.",
-            description=f"Hoşça kal **{member.name}**,\n\n`{member.guild.name}` sunucumuzdan ayrıldığını fark ettim. Fikir değiştirirsen kapımız her zaman açık!",
-            color=discord.Color.dark_red()
-        )
-        embed_dm_cikis.set_footer(text="Geri dönmek istersen yetkililerden güncel davet linkini isteyebilirsin! - TAHLİYE")
-        await member.send(embed=embed_dm_cikis)
-    except Exception:
-        pass
+    if (!interaction.isButton()) return;
 
-# ==========================================
-# 7. OTOMATİK SELAMLAMA SİSTEMİ
-# ==========================================
-@bot.event
-async def on_message(message):
-    if message.author.bot: return
-    mesaj = message.content.lower().strip()
-    if mesaj in ["sa", "selam", "selamün aleyküm", "selamun aleykum", "s.a"]:
-        await message.channel.send(f"Aleyküm Selam, Sunucumuza Hoşgeldin {message.author.mention}! 🌸")
-    await bot.process_commands(message)
+    // TICKET FORMUNU AÇ
+    if (interaction.customId === "craftdora_ticket_open") {
+      const modal = new ModalBuilder()
+        .setCustomId("craftdora_ticket_form")
+        .setTitle("CraftDora Destek Talebi");
 
-# ==========================================
-# 8. BOTU BAŞLATMA
-# ==========================================
-keep_alive()
-token = os.getenv('DISCORD_TOKEN')
-bot.run(token)
+      const nameInput = new TextInputBuilder()
+        .setCustomId("player_name")
+        .setLabel("Minecraft oyuncu adın")
+        .setPlaceholder("Örnek: CraftDoraOyuncu")
+        .setStyle(TextInputStyle.Short)
+        .setMinLength(1)
+        .setMaxLength(32)
+        .setRequired(true);
+
+      const issueInput = new TextInputBuilder()
+        .setCustomId("ticket_issue")
+        .setLabel("Destek konun veya sorunun")
+        .setPlaceholder("Örnek: Hesap sorunu, oyuncu şikâyeti")
+        .setStyle(TextInputStyle.Paragraph)
+        .setMinLength(5)
+        .setMaxLength(300)
+        .setRequired(true);
+
+      modal.addComponents(
+        new ActionRowBuilder().addComponents(nameInput),
+        new ActionRowBuilder().addComponents(issueInput)
+      );
+
+      return interaction.showModal(modal);
+    }
+
+    // ÇEKİLİŞE KATIL
+    if (interaction.customId === "craftdora_giveaway_join") {
+      const giveaway = giveaways.get(interaction.message.id);
+
+      if (!giveaway) {
+        return interaction.reply({
+          content: "Bu çekiliş aktif değil veya sona erdi.",
+          ephemeral: true
+        });
+      }
+
+      if (interaction.user.bot) {
+        return interaction.reply({
+          content: "Botlar çekilişe katılamaz.",
+          ephemeral: true
+        });
+      }
+
+      if (giveaway.participants.has(interaction.user.id)) {
+        return interaction.reply({
+          content: "❌ Bu çekilişe zaten katıldın!",
+          ephemeral: true
+        });
+      }
+
+      giveaway.participants.add(interaction.user.id);
+
+      return interaction.reply({
+        content: "✅ Çekilişe katıldın! Bol şans! 🎉",
+        ephemeral: true
+      });
+    }
+
+  } catch (error) {
+    console.error("Etkileşim hatası:", error);
+
+    if (!interaction.isRepliable()) return;
+
+    try {
+      if (interaction.deferred || interaction.replied) {
+        await interaction.editReply(
+          "❌ İşlem tamamlanamadı. Biraz sonra tekrar dene."
+        );
+      } else {
+        await interaction.reply({
+          content: "❌ İşlem tamamlanamadı. Biraz sonra tekrar dene.",
+          ephemeral: true
+        });
+      }
+    } catch (replyError) {
+      console.error("Hata yanıtı gönderilemedi:", replyError.message);
+    }
+  }
+});
+
+// ==================================================
+// HATA KAYITLARI
+// ==================================================
+
+process.on("unhandledRejection", error => {
+  console.error("İşlenmeyen Promise hatası:", error);
+});
+
+process.on("uncaughtException", error => {
+  console.error("Beklenmeyen hata:", error);
+});
+
+// ==================================================
+// BOTU BAŞLAT
+// ==================================================
+
+if (!TOKEN) {
+  console.error(
+    "DISCORD_TOKEN bulunamadı! Render > Environment bölümüne ekle."
+  );
+  process.exit(1);
+}
+
+client.login(TOKEN).catch(error => {
+  console.error("Discord giriş hatası:", error);
+  process.exit(1);
+});
